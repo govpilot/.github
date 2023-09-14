@@ -1,12 +1,12 @@
-<!--
 
-     Before submitting a Pull Request, please ensure you've done the following:
-     - 👷‍♀️ Create small PRs. In most cases this will be possible.
-     - ✅ Provide tests for your changes when possible.
-     - 📝 Use descriptive commit messages.
-     - 📗 Update any related documentation and include any relevant screenshots.
 
--->
+Before submitting a Pull Request, please ensure you've done the following:
+- 👷‍♀️ Create small PRs. In most cases this will be possible.
+- ✅ Provide tests for your changes when possible.
+- 📝 Use descriptive commit messages.
+- 📗 Update any related documentation and include any relevant screenshots.
+
+
 
 ## What type of PR is this? (check all applicable)
 
@@ -33,8 +33,8 @@ _Replace this line with the description of this PR_
 _Please replace this line with instructions on how to test your changes, add account, module, hyperlinks to forms this has been tested on, as well as any relevant
 images for UI changes._
 
-- [] Form name and link where this feature can be tested. 
-- [] Account (User & ID) & Module (Name & ID)
+- [ ] Form name and link where this feature can be tested. 
+- [ ] Account (User & ID) & Module (Name & ID)
 
 
 ## Added test cases in the Jira story?
@@ -56,5 +56,7 @@ images for UI changes._
 - [ ] This repo does not run have unit tests in pipeline
 - [ ] Adding unit tests is complicated
 
-## [optional] Are there any post deployment tasks that need to be performed?
+## Are there any post deployment tasks that need to be performed?
 
+- [ ] No
+- [ ] Yes, _explain further_
