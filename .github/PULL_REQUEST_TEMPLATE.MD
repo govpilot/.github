@@ -1,4 +1,4 @@
-
+<!--
 
 Before submitting a Pull Request, please ensure you've done the following:
 - 👷‍♀️ Create small PRs. In most cases this will be possible.
@@ -6,7 +6,7 @@ Before submitting a Pull Request, please ensure you've done the following:
 - 📝 Use descriptive commit messages.
 - 📗 Update any related documentation and include any relevant screenshots.
 
-
+-->
 
 ## What type of PR is this? (check all applicable)
 
@@ -14,7 +14,7 @@ Before submitting a Pull Request, please ensure you've done the following:
 - [ ] Bug Fix
 - [ ] Refactor
 - [ ] Optimization
-- [ ] Documentation Update
+- [ ] Documentation & Package Update
 
 ## Description
 
