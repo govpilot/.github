@@ -1,0 +1,66 @@
+# ============================================================
+# pr-lint.yml
+# Trigger: Pull request opened, edited, or synchronized
+# Effect:  Validates that the PR title or body contains a valid
+#          Jira ticket key (e.g. COR-123, BPM-45)
+#          Blocks merge if no ticket key is found.
+#
+# Add this as a required status check in branch protection settings.
+# ============================================================
+
+name: PR Lint – Require Jira Ticket
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+
+jobs:
+  lint-pr:
+    name: Validate Jira Ticket Reference
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR for Jira ticket key
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          COMBINED="${PR_TITLE} ${PR_BODY}"
+          # Match patterns like: BPM-123, COR-45, DOPS-7, HHC-2, etc.
+          TICKET_KEY=$(echo "$COMBINED" | grep -oE '[A-Z]{2,10}-[0-9]+' | head -1)
+          if [ -z "$TICKET_KEY" ]; then
+            echo "❌ ERROR: No Jira ticket key found in PR title or body."
+            echo ""
+            echo "Please include the Jira ticket key in one of these formats:"
+            echo "  • PR title: 'COR-123: Add export button'"
+            echo "  • PR body:  'Jira Ticket: COR-123'"
+            echo ""
+            echo "Valid Jira project prefixes: BPM, COR, DSK, DOPS, GPDA, HHC, HHW, INT, MUI, PM, SEC"
+            exit 1
+          else
+            echo "✅ Found Jira ticket key: $TICKET_KEY"
+          fi
+
+      - name: Check Release Note field
+        if: success()
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Check if Release Note section exists and has content
+          # This is a soft warning, not a blocker
+          if echo "$PR_BODY" | grep -q "Release Note:" ; then
+            RELEASE_NOTE=$(echo "$PR_BODY" | grep -A2 "Release Note:" | tail -1 | xargs)
+            if [ -z "$RELEASE_NOTE" ] || [ "$RELEASE_NOTE" = "Release Note:" ]; then
+              echo "⚠️ WARNING: Release Note field appears to be empty."
+              echo "If this change is visible to clients, please add a one-sentence release note."
+              echo "This is a warning only — it will not block the merge."
+            else
+              echo "✅ Release Note found: $RELEASE_NOTE"
+            fi
+          else
+            echo "ℹ️ No Release Note section found. If this is a client-facing change, consider adding one."
+          fi

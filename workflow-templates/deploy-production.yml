@@ -1,0 +1,69 @@
+# ============================================================
+# deploy-production.yml
+# Trigger: push (merge) to the `main` branch
+# Effect:  Deploys the application to the PRODUCTION environment
+#
+# GATED REPOS: If this repository requires a manual approval before
+# production deploys, go to:
+#   GitHub → Settings → Environments → production → Required reviewers
+# and add the required approvers. GitHub Actions will pause and wait
+# for approval before the deploy job runs.
+#
+# NON-GATED REPOS: Leave the environment protection rules empty and
+# the pipeline will deploy automatically on every merge to main.
+# ============================================================
+
+name: Deploy → Production
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false   # never cancel in-flight production deploys
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production    # Configure required reviewers in repo settings for gated repos
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Build step (customize for your stack) ─────────────
+      - name: Set up Node / Python / Java / etc.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # ── Deploy step ────────────────────────────────────────
+      - name: Deploy to Production
+        env:
+          DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_ENV_URL: ${{ vars.PROD_ENV_URL }}
+        run: |
+          echo "Deploying commit ${{ github.sha }} to production..."
+          # YOUR DEPLOY COMMAND HERE
+          # e.g.: ./scripts/deploy.sh production
+
+      # ── Post-deploy: trigger Jira + Beamer automation ─────
+      # The jira-close-ticket.yml and weekly-version-tag.yml
+      # workflows handle Jira and Beamer automatically.
+      # No additional steps needed here.
+
+      - name: Post deployment notification (optional)
+        if: always()
+        run: |
+          echo "Production deploy status: ${{ job.status }}"
+          # Optionally post to Slack using secrets.SLACK_WEBHOOK_URL

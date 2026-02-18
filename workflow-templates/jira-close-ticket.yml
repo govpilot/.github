@@ -1,0 +1,90 @@
+# ============================================================
+# jira-close-ticket.yml
+# Trigger: A pull request is merged into `main`
+# Effect:  Finds the Jira ticket key in the PR title/body and
+#          transitions it to "Done"
+#
+# Required org/repo secrets:
+#   JIRA_BASE_URL          = https://govpilot.atlassian.net
+#   JIRA_USER_EMAIL        = service-account@govpilot.com
+#   JIRA_API_TOKEN         = (from https://id.atlassian.com/manage-profile/security/api-tokens)
+#   JIRA_DONE_TRANSITION_ID = numeric ID of the "Done" transition
+#                             (find with: GET /rest/api/3/issue/{KEY}/transitions)
+# ============================================================
+
+name: Jira → Close Ticket on Merge
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  close-jira-ticket:
+    name: Transition Jira ticket to Done
+    runs-on: ubuntu-latest
+    # Only run when the PR was actually merged (not just closed)
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Extract Jira ticket key from PR
+        id: extract-key
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Match patterns like: [BPM-123], BPM-123, DOPS-45, COR-7, etc.
+          COMBINED="${PR_TITLE} ${PR_BODY}"
+          TICKET_KEY=$(echo "$COMBINED" | grep -oE '[A-Z]{2,10}-[0-9]+' | head -1)
+          if [ -z "$TICKET_KEY" ]; then
+            echo "No Jira ticket key found in PR title or body. Skipping."
+            echo "found=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found ticket key: $TICKET_KEY"
+            echo "ticket_key=$TICKET_KEY" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Transition Jira ticket to Done
+        if: steps.extract-key.outputs.found == 'true'
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_DONE_TRANSITION_ID: ${{ secrets.JIRA_DONE_TRANSITION_ID }}
+          TICKET_KEY: ${{ steps.extract-key.outputs.ticket_key }}
+        run: |
+          echo "Transitioning $TICKET_KEY to Done..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"transition\": {\"id\": \"${JIRA_DONE_TRANSITION_ID}\"}}" \
+            "${JIRA_BASE_URL}/rest/api/3/issue/${TICKET_KEY}/transitions")
+          echo "HTTP status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" != "204" ]; then
+            echo "Warning: Expected 204, got $HTTP_STATUS. Ticket may already be in Done or transition ID may be wrong."
+          else
+            echo "Successfully transitioned $TICKET_KEY to Done."
+          fi
+
+      - name: Add merge comment to Jira ticket
+        if: steps.extract-key.outputs.found == 'true'
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TICKET_KEY: ${{ steps.extract-key.outputs.ticket_key }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          REPO: ${{ github.repository }}
+        run: |
+          curl -s -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": \"✅ Merged to main by ${MERGED_BY} in ${REPO}. PR: ${PR_URL}\"}]}]}}" \
+            "${JIRA_BASE_URL}/rest/api/3/issue/${TICKET_KEY}/comment"
+          echo "Comment added to $TICKET_KEY."

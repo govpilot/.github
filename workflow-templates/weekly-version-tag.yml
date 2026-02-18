@@ -1,0 +1,259 @@
+# ============================================================
+# weekly-version-tag.yml
+# Trigger: Every Monday at 9:00 AM UTC (scheduled)
+#          Also triggerable manually via workflow_dispatch
+#
+# Effect:
+#   1. Calculates the previous week's date range (Mon–Sun)
+#   2. Finds all PRs merged to `main` in that range (for this repo)
+#   3. Fetches the "Release Note" custom field from linked Jira tickets
+#   4. Creates a version tag: v{YYYY}.{WW}  (e.g. v2026.07)
+#   5. Creates a GitHub Release with the grouped release notes
+#   6. Posts the release notes to Beamer
+#
+# Required org/repo secrets:
+#   JIRA_BASE_URL               = https://govpilot.atlassian.net
+#   JIRA_USER_EMAIL             = service-account@govpilot.com
+#   JIRA_API_TOKEN              = Jira API token
+#   JIRA_RELEASE_NOTE_FIELD_ID  = Custom field ID for "Release Note"
+#                                 (e.g. customfield_10200 — find with
+#                                  GET /rest/api/3/field)
+#   BEAMER_API_KEY              = Beamer API key from getbeamer.com
+#
+# Required org/repo variable:
+#   PRODUCT_NAME                = Human-readable product name
+#                                 (e.g. "Core Platform", "Desktop App")
+#   BEAMER_SEGMENT              = (optional) Beamer segment slug for
+#                                 per-product release note targeting
+# ============================================================
+
+name: Weekly Version Tag & Release Notes
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      week_offset:
+        description: 'Week offset (0 = last week, 1 = two weeks ago)'
+        required: false
+        default: '0'
+
+jobs:
+  weekly-release:
+    name: Create Weekly Version Tag & Publish Release Notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # needed to create tags and releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full history for tagging
+
+      - name: Calculate week range
+        id: week-range
+        run: |
+          OFFSET="${{ github.event.inputs.week_offset || '0' }}"
+          # Last Monday (start of previous week)
+          WEEK_START=$(date -d "last monday - ${OFFSET} weeks" +%Y-%m-%dT00:00:00Z 2>/dev/null \
+                       || date -v-${OFFSET}w -v-mon +%Y-%m-%dT00:00:00Z)
+          # Last Sunday (end of previous week)
+          WEEK_END=$(date -d "last monday - ${OFFSET} weeks + 6 days" +%Y-%m-%dT23:59:59Z 2>/dev/null \
+                     || date -v-${OFFSET}w -v-mon -v+6d +%Y-%m-%dT23:59:59Z)
+          # ISO week number for the version tag
+          YEAR=$(date -d "$WEEK_START" +%Y 2>/dev/null || date -j -f "%Y-%m-%d" "${WEEK_START:0:10}" +%Y)
+          WEEK_NUM=$(date -d "$WEEK_START" +%V 2>/dev/null || date -j -f "%Y-%m-%d" "${WEEK_START:0:10}" +%V)
+          VERSION_TAG="v${YEAR}.${WEEK_NUM}"
+          echo "week_start=$WEEK_START" >> $GITHUB_OUTPUT
+          echo "week_end=$WEEK_END" >> $GITHUB_OUTPUT
+          echo "version_tag=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "Week: $WEEK_START → $WEEK_END | Tag: $VERSION_TAG"
+
+      - name: Fetch merged PRs for the week
+        id: merged-prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WEEK_START: ${{ steps.week-range.outputs.week_start }}
+          WEEK_END: ${{ steps.week-range.outputs.week_end }}
+        run: |
+          # Get all PRs merged to main between week_start and week_end
+          PRS=$(gh pr list \
+            --repo "$REPO" \
+            --state merged \
+            --base main \
+            --json number,title,body,mergedAt,author \
+            --jq "[.[] | select(.mergedAt >= \"$WEEK_START\" and .mergedAt <= \"$WEEK_END\")]")
+          PR_COUNT=$(echo "$PRS" | jq 'length')
+          echo "Found $PR_COUNT merged PRs"
+          echo "prs<<EOF" >> $GITHUB_OUTPUT
+          echo "$PRS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "count=$PR_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Build release notes from Jira tickets
+        id: build-notes
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_RELEASE_NOTE_FIELD_ID: ${{ secrets.JIRA_RELEASE_NOTE_FIELD_ID }}
+          PRS_JSON: ${{ steps.merged-prs.outputs.prs }}
+          PRODUCT_NAME: ${{ vars.PRODUCT_NAME }}
+          VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
+          WEEK_START: ${{ steps.week-range.outputs.week_start }}
+          WEEK_END: ${{ steps.week-range.outputs.week_end }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, re, subprocess, urllib.request, base64
+
+          prs = json.loads(os.environ['PRS_JSON'])
+          jira_base = os.environ['JIRA_BASE_URL']
+          jira_email = os.environ['JIRA_USER_EMAIL']
+          jira_token = os.environ['JIRA_API_TOKEN']
+          field_id = os.environ.get('JIRA_RELEASE_NOTE_FIELD_ID', 'customfield_10200')
+          product = os.environ.get('PRODUCT_NAME', os.environ.get('GITHUB_REPOSITORY', ''))
+          version = os.environ['VERSION_TAG']
+          week_start = os.environ['WEEK_START'][:10]
+          week_end = os.environ['WEEK_END'][:10]
+
+          auth = base64.b64encode(f"{jira_email}:{jira_token}".encode()).decode()
+          headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
+
+          release_notes = []
+          internal_changes = []
+
+          for pr in prs:
+              combined = f"{pr['title']} {pr.get('body', '')}"
+              keys = re.findall(r'[A-Z]{2,10}-[0-9]+', combined)
+
+              pr_note = None
+              if keys:
+                  for key in keys:
+                      try:
+                          url = f"{jira_base}/rest/api/3/issue/{key}?fields=summary,{field_id}"
+                          req = urllib.request.Request(url, headers=headers)
+                          with urllib.request.urlopen(req) as resp:
+                              data = json.loads(resp.read())
+                          note = data.get('fields', {}).get(field_id, '')
+                          if note and note.strip():
+                              pr_note = note.strip()
+                              break
+                      except Exception as e:
+                          print(f"Warning: Could not fetch {key}: {e}")
+
+              if pr_note:
+                  release_notes.append(f"- {pr_note} ({', '.join(keys) if keys else pr['title']})")
+              else:
+                  internal_changes.append(f"- {pr['title']} (#{pr['number']})")
+
+          # Build GitHub Release body
+          lines = [f"## {product} — {version}", f"*Week of {week_start} → {week_end}*", ""]
+          if release_notes:
+              lines += ["### What's New", ""] + release_notes + [""]
+          if internal_changes:
+              lines += ["### Internal Changes", ""] + internal_changes + [""]
+
+          release_body = "\n".join(lines)
+
+          # Build Beamer post (only user-facing notes)
+          beamer_lines = [f"**{product} — {version}** ({week_start} to {week_end})", ""]
+          if release_notes:
+              beamer_lines += release_notes
+          else:
+              beamer_lines += ["*No user-facing changes this week.*"]
+
+          beamer_content = "\n".join(beamer_lines)
+
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"RELEASE_BODY<<DELIM\n{release_body}\nDELIM\n")
+              f.write(f"BEAMER_CONTENT<<DELIM\n{beamer_content}\nDELIM\n")
+              f.write(f"HAS_NOTES={'true' if release_notes else 'false'}\n")
+
+          print("Release notes built successfully.")
+          print(release_body)
+          PYEOF
+
+      - name: Check if tag already exists
+        id: check-tag
+        env:
+          VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
+        run: |
+          if git rev-parse "$VERSION_TAG" >/dev/null 2>&1; then
+            echo "Tag $VERSION_TAG already exists, skipping tag creation."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create version tag
+        if: steps.merged-prs.outputs.count > 0 && steps.check-tag.outputs.exists == 'false'
+        env:
+          VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION_TAG" -m "Weekly release $VERSION_TAG"
+          git push origin "$VERSION_TAG"
+          echo "Created and pushed tag: $VERSION_TAG"
+
+      - name: Create GitHub Release
+        if: steps.merged-prs.outputs.count > 0 && steps.check-tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
+        run: |
+          gh release create "$VERSION_TAG" \
+            --repo "$REPO" \
+            --title "$VERSION_TAG" \
+            --notes "$RELEASE_BODY" \
+            --latest
+
+      - name: Publish to Beamer
+        if: steps.merged-prs.outputs.count > 0 && env.HAS_NOTES == 'true'
+        env:
+          BEAMER_API_KEY: ${{ secrets.BEAMER_API_KEY }}
+          BEAMER_SEGMENT: ${{ vars.BEAMER_SEGMENT }}
+          VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
+          PRODUCT_NAME: ${{ vars.PRODUCT_NAME }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, urllib.request
+
+          api_key = os.environ['BEAMER_API_KEY']
+          segment = os.environ.get('BEAMER_SEGMENT', '')
+          version = os.environ['VERSION_TAG']
+          product = os.environ.get('PRODUCT_NAME', 'Platform Update')
+          content = os.environ['BEAMER_CONTENT']
+
+          payload = {
+              "title": [{"value": f"{product} — {version}", "language": "en"}],
+              "content": [{"value": content, "language": "en"}],
+              "category": "new",
+              "published": True
+          }
+          if segment:
+              payload["filterUsersSegments"] = [segment]
+
+          data = json.dumps(payload).encode()
+          req = urllib.request.Request(
+              "https://api.getbeamer.com/v0/posts",
+              data=data,
+              headers={"Beamer-Api-Key": api_key, "Content-Type": "application/json"},
+              method="POST"
+          )
+          with urllib.request.urlopen(req) as resp:
+              result = json.loads(resp.read())
+          print(f"Beamer post created: {result.get('id', 'unknown')}")
+          PYEOF
+
+      - name: Summary
+        run: |
+          echo "## Weekly Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Tag:** ${{ steps.week-range.outputs.version_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PRs Merged:** ${{ steps.merged-prs.outputs.count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Beamer Published:** ${{ env.HAS_NOTES }}" >> $GITHUB_STEP_SUMMARY
