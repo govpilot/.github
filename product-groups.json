@@ -1,7 +1,7 @@
 {
   "_comment": "This file maps govpilot repositories to products for the weekly versioning workflow.",
   "_comment2": "Each product gets its own version tag (e.g. core-v2026.07) and Beamer release notes post.",
-  "_comment3": "Last updated: 2026-02-18. Repo audit based on active (non-archived) repos pushed since 2024-08-01.",
+  "_comment3": "Last updated: 2026-02-18. Repo audit based on active (non-archived) repos pushed since 2024-08-01. Product lines: GovPilot and SDL (Spatial Data Logic).",
 
   "products": [
     {
@@ -76,23 +76,23 @@
       ]
     },
     {
-      "slug": "hedgehog-core",
-      "name": "Hedgehog Core (SDL Backend)",
-      "beamer_segment": "hedgehog-core",
-      "jira_projects": ["HHC"],
+      "slug": "sdl-core",
+      "name": "SDL Core (Backend)",
+      "beamer_segment": "sdl-core",
+      "jira_projects": ["SDL"],
       "repos": [
         "govpilot/sdl-mono",
         "govpilot/von-karajan",
         "govpilot/SDLPortalSync",
         "govpilot/pit"
       ],
-      "_note_sdl-mono": "Described as 'SDL Web App (Connect, Portal, and Online)' — spans both hedgehog-core and hedgehog-web concerns; placed here as the primary backend mono-repo"
+      "_note_sdl-mono": "Described as 'SDL Web App (Connect, Portal, and Online)' — spans both sdl-core and sdl-web concerns; placed here as the primary backend mono-repo"
     },
     {
-      "slug": "hedgehog-web",
-      "name": "Hedgehog Web (SDL Frontend & Citizen)",
-      "beamer_segment": "hedgehog-web",
-      "jira_projects": ["HHW"],
+      "slug": "sdl-web",
+      "name": "SDL Web (Frontend & Citizen-facing)",
+      "beamer_segment": "sdl-web",
+      "jira_projects": ["SDLW"],
       "repos": [
         "govpilot/sdl-qa"
       ],

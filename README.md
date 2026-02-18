@@ -13,7 +13,7 @@ This repository is the canonical source of GitHub Actions workflow templates, PR
 
 ## Repository Purpose
 
-This `govpilot/.github` repository holds the **single source of truth** for:
+This `govpilot/.github` repository holds the **single source of truth** for all govpilot and SDL (Spatial Data Logic) repositories:
 
 - **CI/CD workflow templates** — teams copy these into their own repos' `.github/workflows/` directory
 - **PR template** — standardized pull request template with Jira ticket linking and release note fields
@@ -54,7 +54,7 @@ In **GitHub → Settings → Variables → Repository variables**, add:
 
 | Variable | Description |
 |---|---|
-| `PRODUCT_NAME` | Your product slug (e.g. `core`, `desktop`, `hedgehog-web`) — used in version tags |
+| `PRODUCT_NAME` | Your product slug (e.g. `core`, `desktop`, `sdl-core`) — used in version tags |
 | `BEAMER_SEGMENT` | The Beamer audience segment for release notes (e.g. `core`, `mobile`) |
 
 > **Note:** `PRODUCT_NAME` and `BEAMER_SEGMENT` are **repo-level variables**, not org secrets. Each repo must set these individually.
