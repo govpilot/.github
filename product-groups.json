@@ -1,12 +1,14 @@
 {
-  "_comment": "This file maps govpilot repositories to products for the weekly versioning workflow.",
-  "_comment2": "Each product gets its own version tag (e.g. core-v2026.07) and Beamer release notes post.",
-  "_comment3": "Last updated: 2026-02-18. Repo audit based on active (non-archived) repos pushed since 2024-08-01. Product lines: GovPilot and SDL (Spatial Data Logic).",
+  "_comment": "Maps govpilot/SDL repositories to product groups for the weekly versioning workflow.",
+  "_comment2": "Each product gets its own version tag (e.g. govpilot-core-v2026.07) and Beamer release notes post.",
+  "_comment3": "Company context: GovPilot (product: Jet/Core) acquired SDL (Spatial Data Logic) which had acquired Hedgerow.",
+  "_comment4": "Last updated: 2026-02-18. Excludes archived repos, devops repos, and QA repos.",
 
   "products": [
     {
-      "slug": "core",
-      "name": "Core Platform (Jet)",
+      "slug": "govpilot-core",
+      "name": "GovPilot Core (Jet)",
+      "company": "GovPilot",
       "beamer_segment": "core",
       "jira_projects": ["COR", "BPM"],
       "repos": [
@@ -23,13 +25,11 @@
         "govpilot/GPUploadService",
         "govpilot/GPFileService",
         "govpilot/GPReportService",
-        "govpilot/cloud_functions",
-        "govpilot/GPSQLSERVER",
-        "govpilot/GPSQLCLR",
-        "govpilot/document-search",
         "govpilot/GPMailMerge",
         "govpilot/GPSecure",
         "govpilot/jwt-service",
+        "govpilot/GPSQLSERVER",
+        "govpilot/GPSQLCLR",
         "govpilot/GPLog.AspNet",
         "govpilot/GPLog.Core",
         "govpilot/GpUtilities.Core",
@@ -37,35 +37,9 @@
       ]
     },
     {
-      "slug": "desktop",
-      "name": "Desktop",
-      "beamer_segment": "desktop",
-      "jira_projects": ["DSK"],
-      "repos": [
-        "govpilot/sdldesktop",
-        "govpilot/sdl-ad-user-mgmt",
-        "govpilot/Framework.WPF",
-        "govpilot/Framework.Core",
-        "govpilot/signing-binaries"
-      ]
-    },
-    {
-      "slug": "mobile-ui",
-      "name": "Mobile & UI",
-      "beamer_segment": "mobile",
-      "jira_projects": ["MUI"],
-      "repos": [
-        "govpilot/sdlcitizen2",
-        "govpilot/sdlmobile-rn",
-        "govpilot/GovInspect2",
-        "govpilot/eForms",
-        "govpilot/GovAlert2",
-        "govpilot/GPGovAlertService"
-      ]
-    },
-    {
-      "slug": "integrations",
-      "name": "Integrations & Payments",
+      "slug": "govpilot-integrations",
+      "name": "GovPilot Integrations & Payments",
+      "company": "GovPilot",
       "beamer_segment": "integrations",
       "jira_projects": ["INT"],
       "repos": [
@@ -76,56 +50,74 @@
       ]
     },
     {
-      "slug": "sdl-core",
-      "name": "SDL Core (Backend)",
-      "beamer_segment": "sdl-core",
+      "slug": "govpilot-govAlert",
+      "name": "GovAlert",
+      "company": "GovPilot",
+      "beamer_segment": "govAlert",
+      "jira_projects": ["GA"],
+      "repos": [
+        "govpilot/GovAlert2",
+        "govpilot/GPGovAlertService"
+      ]
+    },
+    {
+      "slug": "sdl-desktop",
+      "name": "SDL Desktop",
+      "company": "SDL",
+      "beamer_segment": "sdl-desktop",
+      "jira_projects": ["DSK"],
+      "repos": [
+        "govpilot/sdldesktop"
+      ]
+    },
+    {
+      "slug": "sdl-connect",
+      "name": "SDL Connect",
+      "company": "SDL",
+      "beamer_segment": "sdl-connect",
       "jira_projects": ["SDL"],
       "repos": [
         "govpilot/sdl-mono",
+        "govpilot/document-search",
+        "govpilot/cloud_functions",
+        "govpilot/sdlcitizen2",
         "govpilot/von-karajan",
         "govpilot/SDLPortalSync",
         "govpilot/pit"
       ],
-      "_note_sdl-mono": "Described as 'SDL Web App (Connect, Portal, and Online)' — spans both sdl-core and sdl-web concerns; placed here as the primary backend mono-repo"
+      "_notes": {
+        "sdl-mono": "Primary mono-repo: Connect web app (Portal, Online)",
+        "document-search": "Document search service used by Connect",
+        "cloud_functions": "GCP cloud functions backing Connect",
+        "sdlcitizen2": "SDL Citizen app (React Native) — citizen-facing portal",
+        "von-karajan": "SDL Operations Platform — customer mgmt, MOD IV ETL, task orchestration",
+        "SDLPortalSync": "Sync client running on town servers",
+        "pit": "Point-In-Time Secrets Release Service"
+      }
     },
     {
-      "slug": "sdl-web",
-      "name": "SDL Web (Frontend & Citizen-facing)",
-      "beamer_segment": "sdl-web",
-      "jira_projects": ["SDLW"],
+      "slug": "sdl-field-mobile",
+      "name": "SDL Field / Mobile 4",
+      "company": "SDL",
+      "beamer_segment": "sdl-mobile",
+      "jira_projects": ["MOB"],
       "repos": [
-        "govpilot/sdl-qa"
+        "govpilot/sdlmobile-rn"
+      ]
+    },
+    {
+      "slug": "hedgerow-desktop",
+      "name": "Hedgerow Desktop",
+      "company": "Hedgerow",
+      "beamer_segment": "hedgerow-desktop",
+      "jira_projects": ["HDR"],
+      "repos": [
+        "govpilot/sdl-ad-user-mgmt",
+        "govpilot/Framework.WPF",
+        "govpilot/Framework.Core",
+        "govpilot/signing-binaries"
       ],
-      "_note_sdl-qa": "QA repo covering web and mobile SDL surfaces; placed here as it validates the SDL web product"
-    },
-    {
-      "slug": "devops-tooling",
-      "name": "DevOps & Tooling",
-      "beamer_segment": "devops",
-      "jira_projects": ["DOPS"],
-      "repos": [
-        "govpilot/DevOps",
-        "govpilot/sdl-tooling",
-        "govpilot/sdl-hosting",
-        "govpilot/sdl-security",
-        "govpilot/gh-management-tool",
-        "govpilot/data-migrations",
-        "govpilot/data-importer-pipelines",
-        "govpilot/data-operations",
-        "govpilot/.github"
-      ]
-    },
-    {
-      "slug": "qa-automation",
-      "name": "QA & Automation",
-      "beamer_segment": "qa",
-      "jira_projects": ["QA"],
-      "repos": [
-        "govpilot/playwright_e2e",
-        "govpilot/playwrite-system-tests",
-        "govpilot/Automation_Ranorex",
-        "govpilot/qa-vm"
-      ]
+      "_note": "Hedgerow was acquired by SDL. These are supporting desktop/Windows infrastructure repos."
     }
   ]
 }
