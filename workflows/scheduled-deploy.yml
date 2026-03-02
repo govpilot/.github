@@ -1,0 +1,51 @@
+name: Scheduled Deploy — 5AM EST
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # 10:00 UTC = 5:00 AM EST (UTC-5)
+                           # Note: during EDT (Mar-Nov) this runs at 6:00 AM ET
+  workflow_dispatch:       # allow manual trigger for testing
+
+jobs:
+  deploy-queued:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read deploy queue
+        id: queue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+        run: |
+          QUEUE=$(gh api repos/govpilot/.github/actions/variables/SCHEDULED_DEPLOY_QUEUE \
+            --jq '.value' 2>/dev/null || echo '[]')
+          echo "queue=$QUEUE" >> $GITHUB_OUTPUT
+          echo "Queue contents: $QUEUE"
+
+      - name: Nothing in queue
+        if: steps.queue.outputs.queue == '[]' || steps.queue.outputs.queue == ''
+        run: echo "No PRs queued for today. Exiting."
+
+      - name: Merge all queued PRs
+        if: steps.queue.outputs.queue != '[]' && steps.queue.outputs.queue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+        run: |
+          echo '${{ steps.queue.outputs.queue }}' | jq -c '.[]' | while read pr; do
+            REPO=$(echo $pr | jq -r '.repo')
+            PR_NUM=$(echo $pr | jq -r '.pr_number')
+            echo "Merging PR #$PR_NUM in govpilot/$REPO"
+            gh pr merge $PR_NUM \
+              --repo govpilot/$REPO \
+              --merge \
+              --subject "Scheduled deploy 5AM EST" \
+            && echo "✅ Merged: $REPO #$PR_NUM" \
+            || echo "⚠️  Failed (may already be merged or closed): $REPO #$PR_NUM"
+          done
+
+      - name: Clear queue after processing
+        if: steps.queue.outputs.queue != '[]' && steps.queue.outputs.queue != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+        run: |
+          gh api repos/govpilot/.github/actions/variables/SCHEDULED_DEPLOY_QUEUE \
+            -X PATCH -f value='[]'
+          echo "Queue cleared."
