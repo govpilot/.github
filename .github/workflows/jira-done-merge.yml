@@ -12,20 +12,17 @@ on:
         required: true
         type: string
       allowed_repos:
-        description: "Comma-separated repo names to limit scope (e.g. GPFileService,GPEmailService). Leave empty for all repos."
+        description: "Comma-separated repo names to limit scope (e.g. eForms,GPEmailService). Leave empty for all repos."
         required: false
         type: string
         default: ""
 
-env:
-  SCHEDULED_REPOS: '["pphtml","GPDataService","GPDataServiceWrite"]'
-
 jobs:
+
   get-linked-prs:
     runs-on: ubuntu-latest
     outputs:
       prs: ${{ steps.filter.outputs.prs }}
-      has_scheduled_repo: ${{ steps.check.outputs.has_scheduled_repo }}
     steps:
       - name: Get open PRs linked to Jira issue
         id: get-prs
@@ -36,11 +33,16 @@ jobs:
 
           echo "Raw response: $RESPONSE"
 
+          if echo "$RESPONSE" | jq -e '.errorMessages' > /dev/null 2>&1; then
+            echo "Jira API error: $(echo $RESPONSE | jq -r '.errorMessages[]')"
+            exit 1
+          fi
+
           PRS=$(echo "$RESPONSE" | jq -c '[
             .detail[].pullRequests[] |
             select(.status == "OPEN") |
             {
-              repo: (.url | capture("github.com/govpilot/(?P<repo>[^/]+)/pull") | .repo),
+              repo: (.url | split("/") | .[4]),
               pr_number: (.id | ltrimstr("#") | tonumber)
             }
           ]')
@@ -48,7 +50,7 @@ jobs:
           echo "All open PRs: $PRS"
           echo "prs=$PRS" >> $GITHUB_OUTPUT
 
-      - name: Apply allowed_repos filter (for testing)
+      - name: Apply allowed_repos filter
         id: filter
         run: |
           ALLOWED="${{ inputs.allowed_repos }}"
@@ -67,63 +69,36 @@ jobs:
             echo "prs=$FILTERED" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check if any high-risk repo is involved
-        id: check
-        run: |
-          SCHEDULED='${{ env.SCHEDULED_REPOS }}'
-
-          HAS_SCHEDULED=$(echo '${{ steps.filter.outputs.prs }}' | jq \
-            --argjson s "$SCHEDULED" \
-            '[.[] | select(.repo as $r | $s | index($r) != null)] | length > 0')
-
-          echo "has_scheduled_repo=$HAS_SCHEDULED" >> $GITHUB_OUTPUT
-          echo "Involves high-risk repo: $HAS_SCHEDULED"
-
       - name: Fail if no open PRs found
         if: steps.filter.outputs.prs == '[]' || steps.filter.outputs.prs == ''
         run: |
           echo "No open PRs found for ${{ inputs.jira_key }}"
           exit 1
 
-  # Flow B: no high-risk repo involved → merge all immediately
-  merge-immediate:
+  await-approval:
     needs: get-linked-prs
-    if: needs.get-linked-prs.outputs.has_scheduled_repo == 'false'
+    runs-on: ubuntu-latest
+    environment: production-approval
+    steps:
+      - name: PRs pending merge for ${{ inputs.jira_key }}
+        run: |
+          echo "The following PRs will be merged upon approval:"
+          echo '${{ needs.get-linked-prs.outputs.prs }}' \
+            | jq -r '.[] | "  - \(.repo) #\(.pr_number)"'
+
+  merge:
+    needs: [get-linked-prs, await-approval]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         pr: ${{ fromJson(needs.get-linked-prs.outputs.prs) }}
       fail-fast: false
     steps:
-      - name: Merge PR in ${{ matrix.pr.repo }}
+      - name: Merge PR — ${{ matrix.pr.repo }} #${{ matrix.pr.pr_number }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
         run: |
-          echo "Merging PR #${{ matrix.pr.pr_number }} in govpilot/${{ matrix.pr.repo }}"
           gh pr merge ${{ matrix.pr.pr_number }} \
             --repo govpilot/${{ matrix.pr.repo }} \
             --merge \
-            --subject "${{ inputs.jira_key }}: release to production"
-
-  # Flow C: high-risk repo involved → queue ALL repos for 5AM EST next day
-  queue-all:
-    needs: get-linked-prs
-    if: needs.get-linked-prs.outputs.has_scheduled_repo == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Queue ALL PRs for scheduled deploy
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
-        run: |
-          EXISTING=$(gh api repos/govpilot/.github/actions/variables/SCHEDULED_DEPLOY_QUEUE \
-            --jq '.value' 2>/dev/null || echo '[]')
-
-          NEW_QUEUE=$(echo "$EXISTING" | jq -c \
-            ". + ${{ needs.get-linked-prs.outputs.prs }}")
-
-          gh api repos/govpilot/.github/actions/variables/SCHEDULED_DEPLOY_QUEUE \
-            -X PATCH -f value="$NEW_QUEUE" 2>/dev/null || \
-          gh api repos/govpilot/.github/actions/variables/SCHEDULED_DEPLOY_QUEUE \
-            -X POST -f name="SCHEDULED_DEPLOY_QUEUE" -f value="$NEW_QUEUE"
-
-          echo "All PRs queued for 5AM EST deploy: $NEW_QUEUE"
+            --subject "chore(release): ${{ inputs.jira_key }} release to production [skip ci]"
