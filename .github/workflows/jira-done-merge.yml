@@ -101,4 +101,5 @@ jobs:
           gh pr merge ${{ matrix.pr.pr_number }} \
             --repo govpilot/${{ matrix.pr.repo }} \
             --merge \
+                --admin \
             --subject "chore(release): ${{ inputs.jira_key }} release to production [skip ci]"
