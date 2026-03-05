@@ -97,7 +97,39 @@ jobs:
         pr: ${{ fromJson(needs.get-linked-prs.outputs.prs) }}
       fail-fast: false
     steps:
+      - name: Version check — ${{ matrix.pr.repo }}
+        id: version-check
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+        run: |
+          BRANCH="${{ matrix.pr.branch }}"
+          PR_VERSION=$(echo "$BRANCH" | sed 's|^release/||;s|^hotfix/||')
+
+          # Get all tags, strip v prefix, sort by version, take highest
+          LATEST_TAG=$(gh api repos/govpilot/${{ matrix.pr.repo }}/tags \
+            --jq '.[].name' 2>/dev/null | sed 's/^v//' | sort -V | tail -1)
+
+          echo "PR branch version:  $PR_VERSION"
+          echo "Latest tag on repo: ${LATEST_TAG:-"(none)"}"
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No tags found — skipping version check."
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If LATEST_TAG > PR_VERSION, skip this repo
+          HIGHER=$(printf '%s\n%s' "$LATEST_TAG" "$PR_VERSION" | sort -V | tail -1)
+          if [ "$HIGHER" = "$LATEST_TAG" ] && [ "$LATEST_TAG" != "$PR_VERSION" ]; then
+            echo "SKIP: ${{ matrix.pr.repo }} already has $LATEST_TAG on main, which is newer than $BRANCH ($PR_VERSION)."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version check passed: $PR_VERSION >= $LATEST_TAG"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Merge PR — ${{ matrix.pr.repo }} #${{ matrix.pr.pr_number }}
+        if: steps.version-check.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
         run: |
