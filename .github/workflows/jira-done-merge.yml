@@ -41,13 +41,16 @@ jobs:
           PRS=$(echo "$RESPONSE" | jq -c '[
             .detail[].pullRequests[] |
             select(.status == "OPEN") |
+            select(.isDraft == false or .isDraft == null) |
+            select(.sourceBranch | startswith("release/") or startswith("hotfix/")) |
             {
               repo: (.url | split("/") | .[4]),
-              pr_number: (.id | ltrimstr("#") | tonumber)
+              pr_number: (.id | ltrimstr("#") | tonumber),
+              branch: .sourceBranch
             }
           ]')
 
-          echo "All open PRs: $PRS"
+          echo "Filtered open release/hotfix PRs: $PRS"
           echo "prs=$PRS" >> $GITHUB_OUTPUT
 
       - name: Apply allowed_repos filter
@@ -84,7 +87,7 @@ jobs:
         run: |
           echo "The following PRs will be merged upon approval:"
           echo '${{ needs.get-linked-prs.outputs.prs }}' \
-            | jq -r '.[] | "  - \(.repo) #\(.pr_number)"'
+            | jq -r '.[] | "  - \(.repo) #\(.pr_number) (\(.branch))"'
 
   merge:
     needs: [get-linked-prs, await-approval]
@@ -101,5 +104,5 @@ jobs:
           gh pr merge ${{ matrix.pr.pr_number }} \
             --repo govpilot/${{ matrix.pr.repo }} \
             --merge \
-                --admin \
+            --admin \
             --subject "chore(release): ${{ inputs.jira_key }} release to production [skip ci]"
