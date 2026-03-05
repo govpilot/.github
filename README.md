@@ -102,7 +102,7 @@ Copy each workflow from [`workflow-templates/`](./workflow-templates/) to `.gith
 
 ### 2. Add the `close-jira` job to your `cicd.yml`
 
-Add the following job to your existing `.github/workflows/cicd.yml`. It runs after `deploy-to-prod` succeeds and transitions the linked Jira ticket to Done. The `if` condition mirrors the `deploy-to-prod` trigger so both fire on the same event.
+Add the following job to your existing `.github/workflows/cicd.yml`. It runs after `deploy-to-prod` succeeds and transitions the linked Jira ticket to Done — but only once **all** linked release/hotfix PRs across all repos have been merged. The `if` condition mirrors the `deploy-to-prod` trigger so both fire on the same event.
 
 ```yaml
   close-jira:
@@ -121,8 +121,34 @@ Add the following job to your existing `.github/workflows/cicd.yml`. It runs aft
             | grep -oE '[A-Z]+-[0-9]+' | head -1)
           echo "key=$KEY" >> $GITHUB_OUTPUT
 
-      - name: Transition Jira issue to Done
+      - name: Check remaining open PRs
+        id: check
         if: steps.key.outputs.key != ''
+        run: |
+          ISSUE_ID=$(curl -s \
+            -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
+            "https://govpilot.atlassian.net/rest/api/3/issue/${{ steps.key.outputs.key }}" \
+            | jq -r '.id')
+
+          OPEN=$(curl -s \
+            -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
+            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueId=$ISSUE_ID&applicationType=GitHub&dataType=pullrequest" \
+            | jq '[
+                .detail[].pullRequests[] |
+                select(.status == "OPEN") |
+                select(.isDraft == false or .isDraft == null) |
+                select(.sourceBranch | startswith("release/") or startswith("hotfix/"))
+              ] | length')
+
+          echo "Remaining open release/hotfix PRs: $OPEN"
+          if [ "$OPEN" -eq 0 ]; then
+            echo "close=true" >> $GITHUB_OUTPUT
+          else
+            echo "close=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Transition Jira issue to Done
+        if: steps.key.outputs.key != '' && steps.check.outputs.close == 'true'
         uses: atlassian/gajira-transition@v3
         with:
           issue: ${{ steps.key.outputs.key }}
