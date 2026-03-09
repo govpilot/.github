@@ -6,25 +6,19 @@
 # Effect:
 #   1. Calculates the previous week's date range (Mon–Sun)
 #   2. Finds all PRs merged to `main` in that range (for this repo)
-#   3. Fetches the "Release Note" custom field from linked Jira tickets
+#   3. Parses [CUSTOMER] and [INTERNAL] lines from each PR body
 #   4. Creates a version tag: v{YYYY}.{WW}  (e.g. v2026.07)
 #   5. Creates a GitHub Release with the grouped release notes
-#   6. Posts the release notes to Beamer
+#   6. Posts [CUSTOMER] notes to Beamer
 #
 # Required org/repo secrets:
-#   JIRA_BASE_URL               = https://govpilot.atlassian.net
-#   JIRA_USER_EMAIL             = service-account@govpilot.com
-#   JIRA_API_TOKEN              = Jira API token
-#   JIRA_RELEASE_NOTE_FIELD_ID  = Custom field ID for "Release Note"
-#                                 (e.g. customfield_10200 — find with
-#                                  GET /rest/api/3/field)
-#   BEAMER_API_KEY              = Beamer API key from getbeamer.com
+#   BEAMER_API_KEY  = Beamer API key from getbeamer.com
 #
 # Required org/repo variable:
-#   PRODUCT_NAME                = Human-readable product name
-#                                 (e.g. "Core Platform", "Desktop App")
-#   BEAMER_SEGMENT              = (optional) Beamer segment slug for
-#                                 per-product release note targeting
+#   PRODUCT_NAME    = Human-readable product name
+#                     (e.g. "Core Platform", "Desktop App")
+#   BEAMER_SEGMENT  = (optional) Beamer segment slug for
+#                     per-product release note targeting
 # ============================================================
 
 name: Weekly Version Tag & Release Notes
@@ -94,13 +88,9 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
           echo "count=$PR_COUNT" >> $GITHUB_OUTPUT
 
-      - name: Build release notes from Jira tickets
+      - name: Build release notes from PR bodies
         id: build-notes
         env:
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          JIRA_RELEASE_NOTE_FIELD_ID: ${{ secrets.JIRA_RELEASE_NOTE_FIELD_ID }}
           PRS_JSON: ${{ steps.merged-prs.outputs.prs }}
           PRODUCT_NAME: ${{ vars.PRODUCT_NAME }}
           VERSION_TAG: ${{ steps.week-range.outputs.version_tag }}
@@ -108,61 +98,47 @@ jobs:
           WEEK_END: ${{ steps.week-range.outputs.week_end }}
         run: |
           python3 << 'PYEOF'
-          import os, json, re, subprocess, urllib.request, base64
+          import os, json, re
 
           prs = json.loads(os.environ['PRS_JSON'])
-          jira_base = os.environ['JIRA_BASE_URL']
-          jira_email = os.environ['JIRA_USER_EMAIL']
-          jira_token = os.environ['JIRA_API_TOKEN']
-          field_id = os.environ.get('JIRA_RELEASE_NOTE_FIELD_ID', 'customfield_10200')
           product = os.environ.get('PRODUCT_NAME', os.environ.get('GITHUB_REPOSITORY', ''))
           version = os.environ['VERSION_TAG']
           week_start = os.environ['WEEK_START'][:10]
           week_end = os.environ['WEEK_END'][:10]
 
-          auth = base64.b64encode(f"{jira_email}:{jira_token}".encode()).decode()
-          headers = {"Authorization": f"Basic {auth}", "Content-Type": "application/json"}
-
-          release_notes = []
+          customer_notes = []
           internal_changes = []
 
           for pr in prs:
-              combined = f"{pr['title']} {pr.get('body', '')}"
+              body = pr.get('body', '') or ''
+              combined = f"{pr['title']} {body}"
               keys = re.findall(r'[A-Z]{2,10}-[0-9]+', combined)
+              ref = f"({', '.join(keys)})" if keys else f"(#{pr['number']})"
 
-              pr_note = None
-              if keys:
-                  for key in keys:
-                      try:
-                          url = f"{jira_base}/rest/api/3/issue/{key}?fields=summary,{field_id}"
-                          req = urllib.request.Request(url, headers=headers)
-                          with urllib.request.urlopen(req) as resp:
-                              data = json.loads(resp.read())
-                          note = data.get('fields', {}).get(field_id, '')
-                          if note and note.strip():
-                              pr_note = note.strip()
-                              break
-                      except Exception as e:
-                          print(f"Warning: Could not fetch {key}: {e}")
+              customer_match = re.search(r'^\[CUSTOMER\]\s+(.+)$', body, re.MULTILINE)
+              internal_match = re.search(r'^\[INTERNAL\]\s+(.+)$', body, re.MULTILINE)
 
-              if pr_note:
-                  release_notes.append(f"- {pr_note} ({', '.join(keys) if keys else pr['title']})")
-              else:
+              if customer_match:
+                  customer_notes.append(f"- {customer_match.group(1).strip()} {ref}")
+              if internal_match:
+                  internal_changes.append(f"- {internal_match.group(1).strip()} {ref}")
+              elif not customer_match:
+                  # No notes at all — fall back to PR title as internal entry
                   internal_changes.append(f"- {pr['title']} (#{pr['number']})")
 
           # Build GitHub Release body
           lines = [f"## {product} — {version}", f"*Week of {week_start} → {week_end}*", ""]
-          if release_notes:
-              lines += ["### What's New", ""] + release_notes + [""]
+          if customer_notes:
+              lines += ["### What's New", ""] + customer_notes + [""]
           if internal_changes:
               lines += ["### Internal Changes", ""] + internal_changes + [""]
 
           release_body = "\n".join(lines)
 
-          # Build Beamer post (only user-facing notes)
+          # Build Beamer post (only [CUSTOMER] notes)
           beamer_lines = [f"**{product} — {version}** ({week_start} to {week_end})", ""]
-          if release_notes:
-              beamer_lines += release_notes
+          if customer_notes:
+              beamer_lines += customer_notes
           else:
               beamer_lines += ["*No user-facing changes this week.*"]
 
@@ -171,7 +147,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write(f"RELEASE_BODY<<DELIM\n{release_body}\nDELIM\n")
               f.write(f"BEAMER_CONTENT<<DELIM\n{beamer_content}\nDELIM\n")
-              f.write(f"HAS_NOTES={'true' if release_notes else 'false'}\n")
+              f.write(f"HAS_NOTES={'true' if customer_notes else 'false'}\n")
 
           print("Release notes built successfully.")
           print(release_body)
