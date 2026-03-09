@@ -7,10 +7,6 @@ on:
         description: "Jira issue key (e.g. GPDA-2778)"
         required: true
         type: string
-      issue_id:
-        description: "Jira numeric issue ID (use {{issue.id}} from automation)"
-        required: true
-        type: string
       allowed_repos:
         description: "Comma-separated repo names to limit scope (e.g. eForms,GPEmailService). Leave empty for all repos."
         required: false
@@ -26,31 +22,33 @@ jobs:
     steps:
       - name: Get open PRs linked to Jira issue
         id: get-prs
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
         run: |
-          RESPONSE=$(curl -s \
-            -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueId=${{ inputs.issue_id }}&applicationType=GitHub&dataType=pullrequest")
+          JIRA_KEY="${{ inputs.jira_key }}"
 
-          echo "Raw response: $RESPONSE"
+          # Search GitHub for open, non-draft PRs mentioning the Jira key in title or body
+          SEARCH=$(gh api "search/issues" \
+            -X GET \
+            -f q="org:govpilot is:pr is:open is:unmerged $JIRA_KEY in:title,body" \
+            --jq '[.items[] | select(.draft == false) | {number: .number, repo: (.repository_url | split("/") | last)}]')
 
-          if echo "$RESPONSE" | jq -e '.errorMessages' > /dev/null 2>&1; then
-            echo "Jira API error: $(echo $RESPONSE | jq -r '.errorMessages[]')"
-            exit 1
-          fi
+          echo "PRs from GitHub search: $SEARCH"
 
-          PRS=$(echo "$RESPONSE" | jq -c '[
-            .detail[].pullRequests[] |
-            select(.status == "OPEN") |
-            select(.isDraft == false or .isDraft == null) |
-            select((.source.branch // "") | startswith("release/") or startswith("hotfix/")) |
-            {
-              repo: (.url | split("/") | .[4]),
-              pr_number: (.id | ltrimstr("#") | tonumber),
-              branch: .source.branch
-            }
-          ]')
+          # For each PR, fetch the head branch and filter for release/* or hotfix/*
+          PRS=$(echo "$SEARCH" | jq -c '.[]' | while IFS= read -r item; do
+            NUM=$(echo "$item" | jq -r '.number')
+            REPO=$(echo "$item" | jq -r '.repo')
+            PR=$(gh api "repos/govpilot/$REPO/pulls/$NUM" --jq '{branch: .head.ref, draft: .draft}')
+            BRANCH=$(echo "$PR" | jq -r '.branch')
+            IS_DRAFT=$(echo "$PR" | jq -r '.draft')
+            if [ "$IS_DRAFT" = "true" ]; then continue; fi
+            if [[ "$BRANCH" == release/* ]] || [[ "$BRANCH" == hotfix/* ]]; then
+              printf '{"repo":"%s","pr_number":%s,"branch":"%s"}\n' "$REPO" "$NUM" "$BRANCH"
+            fi
+          done | jq -sc '.')
 
-          echo "Filtered open release/hotfix PRs: $PRS"
+          echo "Filtered release/hotfix PRs: $PRS"
           echo "prs=$PRS" >> $GITHUB_OUTPUT
 
       - name: Apply allowed_repos filter
