@@ -7,6 +7,10 @@ on:
         description: "Jira issue key (e.g. GPDA-2778)"
         required: true
         type: string
+      issue_id:
+        description: "Jira numeric issue ID (use {{issue.id}} from automation)"
+        required: true
+        type: string
       allowed_repos:
         description: "Comma-separated repo names to limit scope (e.g. eForms,GPEmailService). Leave empty for all repos."
         required: false
@@ -25,7 +29,7 @@ jobs:
         run: |
           RESPONSE=$(curl -s \
             -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueKey=${{ inputs.jira_key }}&applicationType=GitHub&dataType=pullrequest")
+            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueId=${{ inputs.issue_id }}&applicationType=GitHub&dataType=pullrequest")
 
           echo "Raw response: $RESPONSE"
 
