@@ -23,16 +23,9 @@ jobs:
       - name: Get open PRs linked to Jira issue
         id: get-prs
         run: |
-          ISSUE_RESP=$(curl -s \
-            -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-            "https://govpilot.atlassian.net/rest/api/3/issue/${{ inputs.jira_key }}")
-          echo "Issue lookup response: $ISSUE_RESP"
-          ISSUE_ID=$(echo "$ISSUE_RESP" | jq -r '.id')
-          echo "Resolved issue ID: $ISSUE_ID"
-
           RESPONSE=$(curl -s \
             -u "${{ secrets.JIRA_USER_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}" \
-            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueId=$ISSUE_ID&applicationType=GitHub&dataType=pullrequest")
+            "https://govpilot.atlassian.net/rest/dev-status/1.0/issue/detail?issueKey=${{ inputs.jira_key }}&applicationType=GitHub&dataType=pullrequest")
 
           echo "Raw response: $RESPONSE"
 
