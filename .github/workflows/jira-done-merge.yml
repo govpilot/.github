@@ -42,11 +42,11 @@ jobs:
             .detail[].pullRequests[] |
             select(.status == "OPEN") |
             select(.isDraft == false or .isDraft == null) |
-            select(.sourceBranch | startswith("release/") or startswith("hotfix/")) |
+            select((.source.branch // "") | startswith("release/") or startswith("hotfix/")) |
             {
               repo: (.url | split("/") | .[4]),
               pr_number: (.id | ltrimstr("#") | tonumber),
-              branch: .sourceBranch
+              branch: .source.branch
             }
           ]')
 
