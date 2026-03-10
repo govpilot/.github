@@ -138,6 +138,17 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Approve PR — ${{ matrix.pr.repo }} #${{ matrix.pr.pr_number }}
+        if: steps.version-check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+        run: |
+          gh pr review ${{ matrix.pr.pr_number }} \
+            --repo govpilot/${{ matrix.pr.repo }} \
+            --approve \
+            --body "Approved via Jira Done automation for ${{ inputs.jira_key }}" \
+            2>/dev/null || echo "Approve skipped (already approved or not required)"
+
       - name: Merge PR — ${{ matrix.pr.repo }} #${{ matrix.pr.pr_number }}
         if: steps.version-check.outputs.skip != 'true'
         env:
