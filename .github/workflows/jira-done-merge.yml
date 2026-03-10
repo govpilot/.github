@@ -1,4 +1,5 @@
 name: Merge all PRs on Jira Done
+run-name: "Merge PRs — ${{ inputs.jira_key }}"
 
 on:
   workflow_dispatch:
@@ -85,7 +86,7 @@ jobs:
         run: |
           echo "The following PRs will be merged upon approval:"
           echo '${{ needs.get-linked-prs.outputs.prs }}' \
-            | jq -r '.[] | "  - \(.repo) #\(.pr_number) (\(.branch))"'
+            | jq -r '.[] | "  - https://github.com/govpilot/\(.repo)/pull/\(.pr_number)  [\(.branch)]"'
 
   merge:
     needs: [get-linked-prs, await-approval]
