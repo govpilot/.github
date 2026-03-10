@@ -99,8 +99,42 @@ jobs:
           echo '${{ needs.get-linked-prs.outputs.prs }}' \
             | jq -r '.[] | "  - https://github.com/govpilot/\(.repo)/pull/\(.pr_number)  [\(.branch)]"'
 
-  merge:
+  check-self-approval:
     needs: [get-linked-prs, await-approval]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT_MERGE }}
+    steps:
+      - name: Check no PR was last pushed by a workflow approver
+        run: |
+          APPROVERS=$(gh api repos/govpilot/.github/actions/runs/${{ github.run_id }}/approvals \
+            --jq '[.[].user.login] | join(",")')
+          echo "Workflow approvers: $APPROVERS"
+
+          BLOCKED=$(mktemp)
+          echo "false" > "$BLOCKED"
+
+          echo '${{ needs.get-linked-prs.outputs.prs }}' | jq -c '.[]' | while IFS= read -r pr; do
+            REPO=$(echo "$pr" | jq -r '.repo')
+            NUM=$(echo "$pr" | jq -r '.pr_number')
+            PR_SHA=$(gh api "repos/govpilot/$REPO/pulls/$NUM" --jq '.head.sha')
+            LAST_PUSHER=$(gh api "repos/govpilot/$REPO/commits/$PR_SHA" \
+              --jq '.author.login // .commit.author.name')
+            echo "$REPO #$NUM — last pusher: $LAST_PUSHER"
+            if echo ",$APPROVERS," | grep -q ",$LAST_PUSHER,"; then
+              echo "::error::$REPO #$NUM: last pusher ($LAST_PUSHER) is a workflow approver — self-approval not allowed."
+              echo "true" > "$BLOCKED"
+            fi
+          done
+
+          if [ "$(cat "$BLOCKED")" = "true" ]; then
+            echo "One or more PRs have a self-approval conflict. No PRs will be merged."
+            exit 1
+          fi
+          echo "All PRs passed self-approval check."
+
+  merge:
+    needs: [get-linked-prs, await-approval, check-self-approval]
     runs-on: ubuntu-latest
     strategy:
       matrix:
